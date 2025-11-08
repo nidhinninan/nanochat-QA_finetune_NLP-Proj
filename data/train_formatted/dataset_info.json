@@ -1,0 +1,67 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "science_qa",
+  "dataset_size": 700803250,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/derek-thomas/ScienceQA@f18b0a70359ebfb41f658fd564208d0355b013f4/data/train-00000-of-00001-1028f23e353fbe3e.parquet": {
+      "num_bytes": 377460993,
+      "checksum": null
+    },
+    "hf://datasets/derek-thomas/ScienceQA@f18b0a70359ebfb41f658fd564208d0355b013f4/data/validation-00000-of-00001-6c7328ff6c84284c.parquet": {
+      "num_bytes": 126235086,
+      "checksum": null
+    },
+    "hf://datasets/derek-thomas/ScienceQA@f18b0a70359ebfb41f658fd564208d0355b013f4/data/test-00000-of-00001-f0e719df791966ff.parquet": {
+      "num_bytes": 122386007,
+      "checksum": null
+    }
+  },
+  "download_size": 626082086,
+  "features": {
+    "messages": {
+      "feature": {
+        "content": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "role": {
+          "dtype": "string",
+          "_type": "Value"
+        }
+      },
+      "_type": "List"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 1326885336,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 422309897,
+      "num_examples": 12726,
+      "dataset_name": "science_qa"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 140179645,
+      "num_examples": 4241,
+      "dataset_name": "science_qa"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 138313708,
+      "num_examples": 4241,
+      "dataset_name": "science_qa"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
