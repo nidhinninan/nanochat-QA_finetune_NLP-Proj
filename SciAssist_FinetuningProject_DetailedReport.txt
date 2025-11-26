@@ -1,0 +1,1280 @@
+================================================================================
+                     SCIASSIST FINE-TUNING PROJECT: DETAILED REPORT
+================================================================================
+         Science Teaching Assistant with Nanochat - Complete Documentation
+================================================================================
+
+Project: Fine-tuning Nanochat for Science Question Answering
+Platform: Google Colab with NVIDIA A100-SXM4-40GB (Single GPU)
+Framework: PyTorch with nanochat library (by Andrej Karpathy)
+Dataset: ScienceQA (derek-thomas/ScienceQA from Hugging Face)
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. EXECUTIVE SUMMARY
+2. PROJECT OVERVIEW AND MOTIVATION
+3. THEORETICAL FOUNDATIONS
+4. SYSTEM ARCHITECTURE
+5. FILE STRUCTURE AND RELATIONSHIPS
+6. DETAILED CODE WALKTHROUGH
+   6.1 Main Notebook (sciassist-fine-tune-model-NEW_v7_single_colab.ipynb)
+   6.2 Training Script (sciassist_train.py)
+   6.3 Evaluation Script (sciassist_evaluate.py)
+   6.4 Tokenizer Module (nanochat/nanochat/tokenizer.py)
+   6.5 GPT Model Architecture (nanochat/nanochat/gpt.py)
+   6.6 Checkpoint Manager (nanochat/nanochat/checkpoint_manager.py)
+   6.7 Common Utilities (nanochat/nanochat/common.py)
+7. DATA FLOW AND TRANSFORMATIONS
+8. TRAINING PROCESS AND RESULTS
+9. EVALUATION RESULTS AND ANALYSIS
+10. CONCLUSIONS AND INSIGHTS
+
+================================================================================
+SECTION 1: EXECUTIVE SUMMARY
+================================================================================
+
+This project implements a Supervised Fine-Tuning (SFT) approach to adapt a
+pre-trained conversational language model (nanochat) for science education.
+The goal is to create a "Science Teaching Assistant" capable of answering
+multiple-choice science questions with explanations suitable for elementary
+through high school students.
+
+KEY ACHIEVEMENTS:
+-----------------
+• Successfully fine-tuned a 561M parameter GPT model on 12,000 science QA pairs
+• Achieved validation loss reduction from 1.967 to 0.669 (66% improvement)
+• Fine-tuned model accuracy: 42% vs Base model: 38.24%
+• Training completed in ~13 minutes on single A100 GPU (748 training steps)
+• Best checkpoint saved at step 625 with validation loss of 0.669477
+
+================================================================================
+SECTION 2: PROJECT OVERVIEW AND MOTIVATION
+================================================================================
+
+PROBLEM STATEMENT:
+------------------
+General-purpose language models often lack domain-specific knowledge for
+educational contexts. This project addresses the need for an AI assistant
+that can:
+1. Answer science multiple-choice questions accurately
+2. Provide pedagogically appropriate explanations
+3. Include relevant background context for learning
+
+WHY NANOCHAT?
+-------------
+Nanochat (by Andrej Karpathy) was chosen because:
+• It's a modern, efficient GPT implementation with latest architectural features
+• Includes Rotary Position Embeddings (RoPE) for better sequence modeling
+• Supports efficient BPE tokenization with rustbpe + tiktoken
+• Has a well-structured codebase for learning and modification
+• Approximately 561M parameters - suitable for fine-tuning on consumer GPUs
+
+WHY SCIENCEQA?
+--------------
+The ScienceQA dataset is ideal because:
+• Contains 21,000+ science questions spanning multiple difficulty levels
+• Includes detailed explanations and lecture context
+• Covers natural science, language science, and social science
+• Provides structured multiple-choice format suitable for evaluation
+
+================================================================================
+SECTION 3: THEORETICAL FOUNDATIONS
+================================================================================
+
+3.1 SUPERVISED FINE-TUNING (SFT)
+--------------------------------
+SFT is a transfer learning technique where a pre-trained model is adapted to
+a specific task using labeled data. The process involves:
+
+1. Starting with a model pre-trained on general text (chat-sft checkpoint)
+2. Training on task-specific (input, output) pairs
+3. Using cross-entropy loss to minimize the difference between predicted
+   and expected tokens
+
+Mathematically, for a sequence of tokens (x₁, x₂, ..., xₙ):
+    Loss = -Σ log P(xᵢ | x₁, ..., xᵢ₋₁)
+
+The model learns to predict the next token given all previous tokens,
+focusing only on the assistant's response tokens (masked training).
+
+3.2 TRANSFORMER ARCHITECTURE SPECIFICS
+--------------------------------------
+The nanochat GPT model uses several modern improvements:
+
+a) ROTARY POSITION EMBEDDINGS (RoPE):
+   - Instead of learned positional embeddings, uses rotation matrices
+   - Encodes relative positions through rotation of query/key vectors
+   - Formula: RoPE(x, pos) = x ⊗ cos(pos·θ) + rotate(x) ⊗ sin(pos·θ)
+   - Benefits: Better extrapolation to longer sequences, relative position encoding
+
+b) RMSNORM (Root Mean Square Normalization):
+   - Simpler than LayerNorm: RMSNorm(x) = x / sqrt(mean(x²))
+   - No learnable parameters in this implementation
+   - Applied before attention and MLP (pre-norm architecture)
+
+c) RELU² ACTIVATION:
+   - MLP uses ReLU(x)² instead of GELU or standard ReLU
+   - Provides sparsity benefits while maintaining gradient flow
+   - Formula: f(x) = max(0, x)²
+
+d) QK NORM:
+   - Normalizes queries and keys before attention computation
+   - Improves training stability
+   - Prevents attention logits from growing too large
+
+e) LOGIT SOFTCAPPING:
+   - Applies softcap = 15 * tanh(logits/15) to final logits
+   - Prevents extreme predictions that could destabilize training
+
+f) MULTI-QUERY ATTENTION (MQA):
+   - Allows different numbers of query heads vs key/value heads
+   - Enables more efficient inference through KV cache sharing
+   - Model uses n_head=10, n_kv_head=10 (standard multi-head attention)
+
+3.3 BPE TOKENIZATION
+--------------------
+Byte Pair Encoding (BPE) tokenization:
+- Splits text into subword units based on frequency
+- Uses rustbpe for training (Rust implementation for speed)
+- Uses tiktoken for inference (efficient encoding)
+- Vocabulary size: 65,536 tokens
+- Special tokens for conversation structure:
+  <|bos|>, <|user_start|>, <|user_end|>, <|assistant_start|>, <|assistant_end|>
+
+3.4 OPTIMIZER STRATEGY
+----------------------
+The model uses a DUAL OPTIMIZER approach:
+
+a) MUON OPTIMIZER (for transformer blocks/matrices):
+   - Custom optimizer designed for matrix parameters
+   - Applies momentum with orthogonalization
+   - LR = 0.01, momentum = 0.95
+
+b) ADAMW OPTIMIZER (for embeddings):
+   - Standard AdamW for embedding and unembedding layers
+   - Different learning rates: embedding_lr=0.1, unembedding_lr=0.002
+   - Scaled by model dimension: scale = (1280/768)^(-0.5) ≈ 0.7746
+
+3.5 LEARNING RATE SCHEDULE
+--------------------------
+Uses LINEAR DECAY:
+    lr_multiplier = 1.0 - (step / num_iterations)
+
+Starting from initial_lr, the learning rate linearly decreases to 0 by the
+end of training. This provides stable convergence as training progresses.
+
+================================================================================
+SECTION 4: SYSTEM ARCHITECTURE
+================================================================================
+
+                    ┌─────────────────────────────────────┐
+                    │    Jupyter Notebook (Colab)         │
+                    │    sciassist-fine-tune-model-       │
+                    │    NEW_v7_single_colab.ipynb        │
+                    └─────────────────┬───────────────────┘
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+              │                       │                       │
+              ▼                       ▼                       ▼
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │ Data Preparation│    │  Training Loop  │    │   Evaluation    │
+    │ (Cells 7-10)    │    │(sciassist_train)│    │(sciassist_eval) │
+    └────────┬────────┘    └────────┬────────┘    └────────┬────────┘
+             │                      │                      │
+             ▼                      ▼                      ▼
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │ Hugging Face    │    │   nanochat/     │    │   Metrics &     │
+    │ Datasets        │    │   gpt.py        │    │   Comparisons   │
+    └─────────────────┘    │   tokenizer.py  │    └─────────────────┘
+                           │   checkpoint_   │
+                           │   manager.py    │
+                           │   common.py     │
+                           └─────────────────┘
+
+DATA FLOW:
+----------
+1. ScienceQA Dataset (HuggingFace) 
+   → Downloaded and subsetted (12K train, 4K val, 4K test)
+2. format_scienceqa_for_chat() 
+   → Converts to conversation format with system/user/assistant messages
+3. sft_data_generator() 
+   → Tokenizes and creates batched tensors with loss masks
+4. GPT Model 
+   → Forward pass, loss computation, backpropagation
+5. Checkpoint Manager 
+   → Saves best model based on validation loss
+6. Evaluation 
+   → Compares base vs fine-tuned model responses
+
+================================================================================
+SECTION 5: FILE STRUCTURE AND RELATIONSHIPS
+================================================================================
+
+Project Root/
+│
+├── sciassist-fine-tune-model-NEW_v7_single_colab.ipynb
+│   └── Main orchestration notebook (runs in Colab)
+│
+├── sciassist_train.py
+│   └── Refactored training script (called by notebook Cell 14)
+│
+├── sciassist_evaluate.py
+│   └── Standalone evaluation with plotting capabilities
+│
+├── data/
+│   ├── train_formatted/     # 12,000 formatted examples
+│   ├── val_formatted/       # 4,000 formatted examples
+│   └── test_formatted/      # 4,000 formatted examples
+│
+├── finetuned_model_checkpoint/
+│   ├── model_finetuned.pt           # Best model weights (~2GB)
+│   ├── meta_finetuned.json          # Model config and training info
+│   ├── evaluation_summary.json      # Evaluation results
+│   └── tokenizer/
+│       ├── tokenizer.pkl            # Tokenizer encoding object
+│       └── token_bytes.pt           # Token byte mappings
+│
+└── nanochat/
+    └── nanochat/
+        ├── __init__.py
+        ├── gpt.py               # GPT model architecture
+        ├── tokenizer.py         # BPE tokenizer implementation
+        ├── checkpoint_manager.py # Model saving/loading utilities
+        ├── common.py            # Shared utilities
+        ├── muon.py              # Muon optimizer implementation
+        └── adamw.py             # Distributed AdamW optimizer
+
+DEPENDENCY RELATIONSHIPS:
+-------------------------
+sciassist_train.py IMPORTS FROM:
+├── nanochat.common (autodetect_device_type, compute_init)
+├── nanochat.checkpoint_manager (build_model)
+├── nanochat.tokenizer (RustBPETokenizer)
+└── nanochat.gpt (GPT, GPTConfig)
+
+nanochat/gpt.py IMPORTS FROM:
+├── nanochat.common (get_dist_info, print0)
+├── nanochat.muon (Muon, DistMuon)
+└── nanochat.adamw (DistAdamW)
+
+nanochat/checkpoint_manager.py IMPORTS FROM:
+├── nanochat.common (get_base_dir)
+├── nanochat.gpt (GPT, GPTConfig)
+└── nanochat.tokenizer (get_tokenizer)
+
+================================================================================
+SECTION 6: DETAILED CODE WALKTHROUGH
+================================================================================
+
+6.1 MAIN NOTEBOOK (sciassist-fine-tune-model-NEW_v7_single_colab.ipynb)
+=======================================================================
+
+The notebook is organized into 17 cells with a logical flow:
+
+CELL 0-1: ENVIRONMENT SETUP
+---------------------------
+```python
+# Clone nanochat repository
+nanochat_repo = Path("nanochat")
+if not nanochat_repo.exists():
+    subprocess.run(["git", "clone", "https://github.com/karpathy/nanochat.git"])
+
+# Install as editable package
+!pip install -e ./nanochat
+```
+PURPOSE: Ensures nanochat library is available for imports. Uses editable install
+so local modifications take effect immediately.
+
+CELL 2: GPU DETECTION
+---------------------
+```python
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+```
+OUTPUT: "CUDA is available. You have 1 GPU(s) available."
+        "GPU 0: NVIDIA A100-SXM4-40GB"
+
+CELL 3: DOWNLOAD BASE MODEL
+---------------------------
+Downloads pre-trained checkpoint from HuggingFace:
+- model_000650.pt (~2GB) - Model weights at step 650
+- meta_000650.json - Model configuration and training metadata
+- tokenizer.pkl - Trained tokenizer encoding
+- token_bytes.pt - Token-to-byte mappings
+
+These are stored in ~/.cache/nanochat/chatsft_checkpoints/d20/
+
+CELL 4-5: TOKENIZER INITIALIZATION
+----------------------------------
+```python
+tokenizer = RustBPETokenizer.from_directory(str(tokenizer_dir))
+
+# Pre-compute special token IDs for efficiency
+bos_id = tokenizer.get_bos_token_id()
+assistant_start_id = tokenizer.encode_special("<|assistant_start|>")
+assistant_end_id = tokenizer.encode_special("<|assistant_end|>")
+```
+PURPOSE: Initializes tokenizer and caches frequently used special token IDs.
+
+CELL 6: HUGGINGFACE AUTHENTICATION
+----------------------------------
+```python
+from huggingface_hub import login
+hf_token = userdata.get('HF_TOKEN')
+login(token=hf_token)
+```
+PURPOSE: Authenticates with HuggingFace for dataset access.
+
+CELL 7-8: DATASET LOADING AND SUBSETTING
+----------------------------------------
+```python
+full_dataset = load_dataset('derek-thomas/ScienceQA')
+
+# Create balanced subsets
+train_subset = full_dataset['train'].shuffle(seed=42).select(range(12000))
+val_subset = full_dataset['validation'].shuffle(seed=42).select(range(4000))
+test_subset = full_dataset['test'].shuffle(seed=42).select(range(4000))
+```
+OUTPUT: "Train subset: 12000 | Validation subset: 4000 | Test subset: 4000"
+
+RATIONALE: Using subsets (12K/4K/4K) instead of full dataset for:
+- Faster training iteration during development
+- Reduced memory requirements
+- Still sufficient data for effective fine-tuning
+
+CELL 9: DATA FORMATTING FUNCTION
+--------------------------------
+```python
+def format_scienceqa_for_chat(example):
+    # Build question with choices (A. option1, B. option2, etc.)
+    question = example['question']
+    choices_text = "\n".join([f"{chr(65+i)}. {choice}" 
+                              for i, choice in enumerate(choices)])
+    
+    # Build answer with explanation and background
+    response = f"The correct answer is {chr(65+answer_idx)}. {correct_answer}"
+    if example.get('solution'):
+        response += f"\n\nExplanation: {example['solution']}"
+    if example.get('lecture'):
+        response += f"\n\nBackground: {example['lecture']}"
+    
+    # Return conversational format
+    return {
+        "messages": [
+            {"role": "system", "content": "You are a helpful science tutor..."},
+            {"role": "user", "content": full_question},
+            {"role": "assistant", "content": response}
+        ]
+    }
+```
+
+PURPOSE: Converts raw ScienceQA data into a conversational format that matches
+nanochat's expected input structure. The format ensures:
+1. System message sets the context (science tutor role)
+2. User message contains question with labeled choices
+3. Assistant message provides the correct answer with explanation
+
+CELL 10: APPLY FORMATTING AND SAVE
+----------------------------------
+```python
+train_formatted = train_subset.map(format_scienceqa_for_chat, 
+                                   remove_columns=train_subset.column_names)
+train_formatted.save_to_disk(str(train_formatted_path))
+```
+PURPOSE: Applies formatting transformation and persists to disk for reproducibility.
+
+CELL 13-14: TRAINING EXECUTION
+------------------------------
+```python
+os.environ["SCIASSIST_TEST_MODE"] = "0"     # Full training
+os.environ["SCIASSIST_SKIP_TRAINING"] = "0"  # Run training
+
+!python sciassist_train.py
+```
+PURPOSE: Invokes the training script with environment variables controlling
+execution mode. The script is run as a separate process to ensure clean
+memory management.
+
+CELL 15-16: CHECKPOINT EXPORT
+-----------------------------
+Creates a zip archive of the fine-tuned checkpoint and copies to Google Drive
+for persistence beyond Colab session.
+
+================================================================================
+6.2 TRAINING SCRIPT (sciassist_train.py)
+================================================================================
+
+CONFIGURATION SECTION (Lines 40-72):
+------------------------------------
+```python
+# Paths
+DATA_DIR = Path("data")
+TRAIN_DATA_PATH = DATA_DIR / "train_formatted"
+VAL_DATA_PATH = DATA_DIR / "val_formatted"
+OUTPUT_DIR = Path("finetuned_model_checkpoint")
+
+# Training hyperparameters
+DEVICE_BATCH_SIZE = 8      # Sequences per GPU per micro-step
+TARGET_EXAMPLES_PER_STEP = 64  # Effective batch size
+NUM_EPOCHS = 4             # Number of epochs over training data
+UNEMBEDDING_LR = 2e-3      # LR for lm_head
+EMBEDDING_LR = 1e-1        # LR for token embeddings
+MATRIX_LR = 1e-2           # LR for transformer blocks (Muon)
+WEIGHT_DECAY = 0.0         # No weight decay
+INIT_LR_FRAC = 0.02        # Initial LR fraction (warmup effect)
+EVAL_EVERY = 25            # Validation frequency
+EVAL_STEPS = 25            # Number of validation batches
+```
+
+GRADIENT ACCUMULATION CALCULATION:
+----------------------------------
+grad_accum_steps = TARGET_EXAMPLES_PER_STEP // DEVICE_BATCH_SIZE = 64 // 8 = 8
+
+This means:
+- Each micro-step processes 8 sequences
+- 8 micro-steps accumulate gradients
+- One optimizer step processes 64 sequences total
+
+DATA GENERATOR FUNCTION (Lines 78-109):
+---------------------------------------
+```python
+def sft_data_generator(dataset, tokenizer, batch_size, device):
+    """Data generator adapted from nanochat/scripts/chat_sft.py"""
+    pad_token_id = tokenizer.encode_special("<|assistant_end|>")
+    
+    def collate_and_yield(batch):
+        # Determine batch dimensions
+        nrows = len(batch)
+        ncols = max(len(ids) for ids, mask in batch) - 1
+        
+        # Initialize padded tensors
+        inputs = torch.full((nrows, ncols), pad_token_id, dtype=torch.long)
+        targets = torch.full((nrows, ncols), -1, dtype=torch.long)  # -1 = ignore
+        
+        for i, (ids, mask) in enumerate(batch):
+            # Copy token IDs
+            inputs[i, :n-1] = ids_tensor[:-1]  # Input tokens
+            targets[i, :n-1] = ids_tensor[1:]  # Target tokens (shifted)
+            
+            # Apply mask: only train on assistant tokens
+            mask_tensor = torch.tensor(mask[1:], dtype=torch.long)
+            row_targets[mask_tensor == 0] = -1  # Mask non-assistant tokens
+        
+        return inputs.to(device), targets.to(device)
+```
+
+KEY INSIGHT: The mask ensures loss is only computed for assistant responses.
+User messages and padding are set to -1, which PyTorch's cross_entropy ignores.
+
+TRAINING LOOP (Lines 370-454):
+------------------------------
+```python
+for step in range(num_iterations):
+    t0 = time.time()
+    
+    # VALIDATION (every EVAL_EVERY steps)
+    if last_step or step % EVAL_EVERY == 0:
+        model.eval()
+        losses = []
+        for _ in range(EVAL_STEPS):
+            val_inputs, val_targets = next(val_iter)
+            with torch.no_grad(), autocast_ctx:
+                loss = model(val_inputs, val_targets)
+            losses.append(loss)
+        val_loss = torch.stack(losses).mean().item()
+        
+        # Save best checkpoint
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model_to_save.state_dict(), best_model_path)
+    
+    # TRAINING STEP (gradient accumulation)
+    model.train()
+    for micro_step in range(grad_accum_steps):
+        train_inputs, train_targets = next(train_iter)
+        with autocast_ctx:
+            loss = model(train_inputs, train_targets)
+        train_loss = loss.detach()
+        loss = loss / grad_accum_steps  # Scale for accumulation
+        loss.backward()
+    
+    # UPDATE LEARNING RATE
+    lrm = get_lr_multiplier(step, num_iterations)  # Linear decay
+    for opt in optimizers:
+        for group in opt.param_groups:
+            group["lr"] = group["initial_lr"] * lrm
+    
+    # OPTIMIZER STEP
+    for opt in optimizers:
+        opt.step()
+    model.zero_grad(set_to_none=True)
+```
+
+CRITICAL DETAILS:
+1. AUTOCAST: Uses bfloat16 mixed precision for memory efficiency
+2. GRADIENT ACCUMULATION: Divides loss by accumulation steps before backward
+3. LR SCHEDULE: Linear decay from initial value to 0
+4. CHECKPOINTING: Saves only when validation improves (early stopping benefit)
+
+================================================================================
+6.3 EVALUATION SCRIPT (sciassist_evaluate.py)
+================================================================================
+
+RESPONSE GENERATION (Lines 109-124):
+------------------------------------
+```python
+def generate_response(model, tokenizer, conversation, autocast_ctx, 
+                      max_tokens=256, temperature=0.7, top_k=50):
+    # Prepare conversation for completion
+    conversation_copy["messages"][-1]["content"] = ""  # Empty assistant
+    prompt_tokens = tokenizer.render_for_completion(conversation_copy)
+    tokens = list(prompt_tokens)
+    
+    # Autoregressive generation
+    with torch.no_grad():
+        with autocast_ctx:
+            for token in model.generate(tokens, max_tokens=max_tokens, 
+                                        temperature=temperature, top_k=top_k):
+                tokens.append(token)
+                generated.append(token)
+                if token == assistant_end:  # Stop at end token
+                    break
+    
+    return tokenizer.decode(generated).strip()
+```
+
+PURPOSE: Generates model responses for comparison. Uses temperature=0.0 and
+top_k=1 during evaluation for deterministic outputs.
+
+ACCURACY COMPUTATION (Lines 126-136):
+-------------------------------------
+```python
+def compute_accuracy(results, response_key):
+    correct = 0
+    total = 0
+    for entry in results:
+        expected_letter = extract_choice_letter(entry["expected"])
+        predicted_letter = extract_choice_letter(entry.get(response_key, ""))
+        if expected_letter and predicted_letter:
+            total += 1
+            if expected_letter == predicted_letter:
+                correct += 1
+    return (correct, total, correct / total if total else 0.0)
+```
+
+The extract_choice_letter function uses regex patterns to find the answer letter:
+```python
+patterns = [
+    r"\b([A-F])\.",              # "A." format
+    r"answer is ([A-F])\b",      # "answer is A" format
+    r"correct answer is ([A-F])\b",  # Full format
+    r"\b([A-F])\b",              # Standalone letter
+]
+```
+
+LOG PARSING FOR PLOTTING (Lines 142-168):
+-----------------------------------------
+```python
+def parse_training_log(log_file):
+    train_loss_pattern = re.compile(r"Step (\d+)/\d+ \| Train loss: ([\d.]+)")
+    val_loss_pattern = re.compile(r"Step (\d+) \| Val loss: ([\d.]+)")
+    
+    data = []
+    with open(log_file, 'r') as f:
+        for line in f:
+            train_match = train_loss_pattern.search(line)
+            if train_match:
+                step, loss = train_match.groups()
+                data.append({'step': int(step), 'loss': float(loss), 'type': 'Train'})
+            # Similar for validation...
+    
+    return pd.DataFrame(data)
+```
+
+PURPOSE: Extracts training metrics from log files for visualization.
+
+================================================================================
+6.4 TOKENIZER MODULE (nanochat/nanochat/tokenizer.py)
+================================================================================
+
+ARCHITECTURE: Two tokenizer implementations are provided:
+
+1. HuggingFaceTokenizer - Uses HuggingFace Tokenizers library
+2. RustBPETokenizer - Uses rustbpe (Rust) for training + tiktoken for inference
+
+The project uses RustBPETokenizer for its efficiency.
+
+SPECIAL TOKENS (Lines 13-25):
+-----------------------------
+```python
+SPECIAL_TOKENS = [
+    "<|bos|>",           # Beginning of sequence
+    "<|user_start|>",    # User message start
+    "<|user_end|>",      # User message end
+    "<|assistant_start|>",  # Assistant response start
+    "<|assistant_end|>",    # Assistant response end
+    "<|python_start|>",  # Python REPL tool (not used in this project)
+    "<|python_end|>",
+    "<|output_start|>",  # Tool output
+    "<|output_end|>",
+]
+```
+
+SPLIT PATTERN (Lines 27-30):
+----------------------------
+```python
+SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+```
+This is a GPT-4 style regex pattern that pre-tokenizes text before BPE.
+Key features:
+- Handles contractions ('ll, 've, 're, etc.)
+- Groups letters together
+- Limits number groups to 1-2 digits (modified from GPT-4's 1-3)
+
+CONVERSATION RENDERING (Lines 258-342):
+---------------------------------------
+```python
+def render_conversation(self, conversation, max_tokens=2048):
+    """
+    Tokenize a single Chat conversation.
+    Returns:
+    - ids: list[int] of token ids
+    - mask: list[int] where 1 = train on this token, 0 = don't train
+    """
+    ids, mask = [], []
+    
+    def add_tokens(token_ids, mask_val):
+        ids.extend(token_ids)
+        mask.extend([mask_val] * len(token_ids))
+    
+    # Handle system message by merging with first user message
+    if conversation["messages"][0]["role"] == "system":
+        messages[1]["content"] = messages[0]["content"] + "\n\n" + messages[1]["content"]
+        messages = messages[1:]
+    
+    # Add BOS token (not trained on)
+    add_tokens(bos, 0)
+    
+    for message in messages:
+        if message["role"] == "user":
+            add_tokens(user_start, 0)
+            add_tokens(self.encode(content), 0)  # Don't train on user
+            add_tokens(user_end, 0)
+        elif message["role"] == "assistant":
+            add_tokens(assistant_start, 0)
+            add_tokens(self.encode(content), 1)  # TRAIN on assistant!
+            add_tokens(assistant_end, 1)  # Also train on end token
+    
+    return ids[:max_tokens], mask[:max_tokens]
+```
+
+CRITICAL INSIGHT: The mask mechanism is central to SFT:
+- mask=0 for user input, system prompt, special tokens
+- mask=1 ONLY for assistant response tokens
+- This ensures the model learns to generate appropriate responses
+  without learning to reproduce user questions
+
+RENDER FOR COMPLETION (Lines 359-377):
+--------------------------------------
+```python
+def render_for_completion(self, conversation):
+    """
+    Used during inference. Primes the Assistant for a completion.
+    """
+    conversation = copy.deepcopy(conversation)
+    messages = conversation["messages"]
+    
+    # Remove the last (assistant) message - we'll generate it
+    assert messages[-1]["role"] == "assistant"
+    messages.pop()
+    
+    # Tokenize the conversation
+    ids, mask = self.render_conversation(conversation)
+    
+    # Append assistant start token to prime generation
+    assistant_start = self.encode_special("<|assistant_start|>")
+    ids.append(assistant_start)
+    return ids
+```
+
+PURPOSE: Prepares a prompt for autoregressive generation by including all
+context up to where the assistant should start responding.
+
+================================================================================
+6.5 GPT MODEL ARCHITECTURE (nanochat/nanochat/gpt.py)
+================================================================================
+
+MODEL CONFIGURATION (Lines 26-33):
+----------------------------------
+```python
+@dataclass
+class GPTConfig:
+    sequence_len: int = 1024   # Max sequence length (overridden to 2048)
+    vocab_size: int = 50304    # Tokenizer vocabulary (overridden to 65536)
+    n_layer: int = 12          # Transformer layers (overridden to 20)
+    n_head: int = 6            # Query heads (overridden to 10)
+    n_kv_head: int = 6         # KV heads (overridden to 10)
+    n_embd: int = 768          # Embedding dimension (overridden to 1280)
+```
+
+ACTUAL MODEL CONFIG USED:
+- sequence_len: 2048 tokens
+- vocab_size: 65,536 tokens
+- n_layer: 20 transformer blocks
+- n_head: 10 query attention heads
+- n_kv_head: 10 key/value heads (standard MHA, not MQA)
+- n_embd: 1,280 embedding dimension
+
+TOTAL PARAMETERS: ~561 million
+
+RMSNORM FUNCTION (Lines 36-38):
+-------------------------------
+```python
+def norm(x):
+    # Purely functional rmsnorm with no learnable params
+    return F.rms_norm(x, (x.size(-1),))
+```
+
+ROTARY EMBEDDING APPLICATION (Lines 41-49):
+-------------------------------------------
+```python
+def apply_rotary_emb(x, cos, sin):
+    assert x.ndim == 4  # (batch, head, seq, dim)
+    d = x.shape[3] // 2
+    x1, x2 = x[..., :d], x[..., d:]  # Split into two halves
+    y1 = x1 * cos + x2 * sin         # Apply rotation
+    y2 = x1 * (-sin) + x2 * cos
+    return torch.cat([y1, y2], 3)
+```
+
+MATH: For position p and dimension d:
+θ_d = 1 / (10000^(2d/dim))
+cos_embed[p,d] = cos(p * θ_d)
+sin_embed[p,d] = sin(p * θ_d)
+
+CAUSAL SELF-ATTENTION (Lines 51-110):
+-------------------------------------
+```python
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config, layer_idx):
+        # Separate Q, K, V projections (no bias)
+        self.c_q = nn.Linear(n_embd, n_head * head_dim, bias=False)
+        self.c_k = nn.Linear(n_embd, n_kv_head * head_dim, bias=False)
+        self.c_v = nn.Linear(n_embd, n_kv_head * head_dim, bias=False)
+        self.c_proj = nn.Linear(n_embd, n_embd, bias=False)
+    
+    def forward(self, x, cos_sin, kv_cache):
+        # Project to Q, K, V
+        q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+        k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+        v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+        
+        # Apply Rotary Embeddings
+        q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+        
+        # QK Norm for stability
+        q, k = norm(q), norm(k)
+        
+        # Causal attention
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        
+        # Output projection
+        y = y.transpose(1, 2).contiguous().view(B, T, -1)
+        return self.c_proj(y)
+```
+
+MLP BLOCK (Lines 113-123):
+--------------------------
+```python
+class MLP(nn.Module):
+    def __init__(self, config):
+        # 4x expansion (1280 -> 5120 -> 1280)
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
+    
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = F.relu(x).square()  # ReLU² activation
+        return self.c_proj(x)
+```
+
+TRANSFORMER BLOCK (Lines 126-135):
+----------------------------------
+```python
+class Block(nn.Module):
+    def forward(self, x, cos_sin, kv_cache):
+        x = x + self.attn(norm(x), cos_sin, kv_cache)  # Pre-norm attention
+        x = x + self.mlp(norm(x))                       # Pre-norm MLP
+        return x
+```
+
+GPT FORWARD PASS (Lines 244-276):
+---------------------------------
+```python
+def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+    # Get rotary embeddings for sequence
+    cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T]
+    
+    # Token embeddings with normalization
+    x = self.transformer.wte(idx)
+    x = norm(x)
+    
+    # Apply transformer blocks
+    for block in self.transformer.h:
+        x = block(x, cos_sin, kv_cache)
+    
+    # Final normalization
+    x = norm(x)
+    
+    # Compute logits with softcap
+    softcap = 15
+    logits = self.lm_head(x)
+    logits = softcap * torch.tanh(logits / softcap)  # Prevent extreme values
+    
+    if targets is not None:
+        # Training: compute cross-entropy loss
+        logits = logits.float()  # Use fp32 for loss
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), 
+                               targets.view(-1), 
+                               ignore_index=-1)  # Ignore masked tokens
+        return loss
+    else:
+        # Inference: return logits
+        return logits
+```
+
+OPTIMIZER SETUP (Lines 213-242):
+--------------------------------
+```python
+def setup_optimizers(self, unembedding_lr=0.004, embedding_lr=0.2, 
+                     matrix_lr=0.02, weight_decay=0.0):
+    # Separate parameter groups
+    matrix_params = list(self.transformer.h.parameters())  # Transformer blocks
+    embedding_params = list(self.transformer.wte.parameters())  # Embeddings
+    lm_head_params = list(self.lm_head.parameters())  # Output projection
+    
+    # Scale LR by model dimension
+    dmodel_lr_scale = (model_dim / 768) ** -0.5  # ~0.775 for 1280d
+    
+    # AdamW for embeddings (handles discrete representations)
+    adamw_optimizer = AdamWFactory([
+        dict(params=lm_head_params, lr=unembedding_lr * dmodel_lr_scale),
+        dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
+    ], betas=(0.8, 0.95), eps=1e-10)
+    
+    # Muon for transformer matrices (specialized for orthogonal updates)
+    muon_optimizer = MuonFactory(matrix_params, lr=matrix_lr, momentum=0.95)
+    
+    return [adamw_optimizer, muon_optimizer]
+```
+
+RATIONALE FOR DUAL OPTIMIZER:
+1. Embedding layers benefit from AdamW's adaptive learning rates
+2. Matrix layers (attention, MLP) benefit from Muon's orthogonality preservation
+3. Different LR scales account for different gradient magnitudes
+
+AUTOREGRESSIVE GENERATION (Lines 278-307):
+------------------------------------------
+```python
+@torch.inference_mode()
+def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
+    device = self.get_device()
+    rng = torch.Generator(device=device).manual_seed(seed)
+    ids = torch.tensor([tokens], dtype=torch.long, device=device)
+    
+    for _ in range(max_tokens):
+        logits = self.forward(ids)  # Forward pass
+        logits = logits[:, -1, :]   # Take last position
+        
+        # Apply top-k filtering
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = -float('Inf')
+        
+        # Sample or argmax
+        if temperature > 0:
+            logits = logits / temperature
+            probs = F.softmax(logits, dim=-1)
+            next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+        else:
+            next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+        
+        ids = torch.cat((ids, next_ids), dim=1)
+        yield next_ids.item()
+```
+
+================================================================================
+6.6 CHECKPOINT MANAGER (nanochat/nanochat/checkpoint_manager.py)
+================================================================================
+
+BUILD_MODEL FUNCTION (Lines 58-109):
+------------------------------------
+```python
+def build_model(checkpoint_dir, step, device, phase):
+    """
+    Returns:
+    - base model - uncompiled, not wrapped in DDP
+    - tokenizer
+    - meta data saved during base model training
+    """
+    # Load checkpoint data
+    model_data, _, meta_data = load_checkpoint(checkpoint_dir, step, device)
+    
+    # Handle CPU/MPS dtype conversion
+    if device.type in {"cpu", "mps"}:
+        model_data = {k: v.float() if v.dtype == torch.bfloat16 else v
+                      for k, v in model_data.items()}
+    
+    # Fix torch.compile prefix issue
+    model_data = {k.removeprefix("_orig_mod."): v for k, v in model_data.items()}
+    
+    # Build model from config
+    model_config = GPTConfig(**meta_data["model_config"])
+    model = GPT(model_config).to(device)
+    
+    # Initialize rotary embeddings
+    model.init_weights()
+    
+    # Load state dict
+    model.load_state_dict(model_data, strict=True)
+    
+    # Set mode
+    if phase == "eval":
+        model.eval()
+    else:
+        model.train()
+    
+    # Load tokenizer
+    tokenizer = get_tokenizer()
+    
+    return model, tokenizer, meta_data
+```
+
+CHECKPOINT NAMING CONVENTION:
+- model_{step:06d}.pt - Model weights
+- meta_{step:06d}.json - Model config and training metadata
+- optim_{step:06d}.pt - Optimizer state (optional)
+
+================================================================================
+6.7 COMMON UTILITIES (nanochat/nanochat/common.py)
+================================================================================
+
+COMPUTE INITIALIZATION (Lines 141-174):
+---------------------------------------
+```python
+def compute_init(device_type="cuda"):
+    """Basic initialization for training/inference."""
+    
+    # Reproducibility
+    torch.manual_seed(42)
+    if device_type == "cuda":
+        torch.cuda.manual_seed(42)
+    
+    # Precision settings
+    if device_type == "cuda":
+        torch.set_float32_matmul_precision("high")  # Use TF32 for matmuls
+    
+    # Distributed setup
+    ddp, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
+    if ddp and device_type == "cuda":
+        device = torch.device("cuda", ddp_local_rank)
+        torch.cuda.set_device(device)
+        dist.init_process_group(backend="nccl", device_id=device)
+        dist.barrier()
+    else:
+        device = torch.device(device_type)
+    
+    return ddp, ddp_rank, ddp_local_rank, ddp_world_size, device
+```
+
+NOTE: For this single-GPU Colab project, ddp=False and world_size=1.
+The function is designed to also support multi-GPU training.
+
+================================================================================
+SECTION 7: DATA FLOW AND TRANSFORMATIONS
+================================================================================
+
+COMPLETE DATA PIPELINE:
+-----------------------
+
+STEP 1: RAW SCIENCEQA DATA
+--------------------------
+Input format:
+{
+    "question": "What is photosynthesis?",
+    "choices": ["Process of making food", "Process of breathing", ...],
+    "answer": 0,  # Index of correct answer
+    "solution": "Photosynthesis is the process by which plants...",
+    "lecture": "Plants are living organisms that can make their own food..."
+}
+
+STEP 2: CONVERSATIONAL FORMAT
+-----------------------------
+After format_scienceqa_for_chat():
+{
+    "messages": [
+        {"role": "system", "content": "You are a helpful science tutor..."},
+        {"role": "user", "content": "What is photosynthesis?\n\nA. Process of making food\nB. Process of breathing..."},
+        {"role": "assistant", "content": "The correct answer is A. Process of making food\n\nExplanation: Photosynthesis is...\n\nBackground: Plants are living organisms..."}
+    ]
+}
+
+STEP 3: TOKENIZATION
+--------------------
+After render_conversation():
+tokens: [BOS, USER_START, 1234, 5678, ..., USER_END, ASST_START, 4321, 8765, ..., ASST_END]
+mask:   [  0,          0,    0,    0, ...,        0,          0,    1,    1, ...,       1]
+
+STEP 4: BATCHING AND PADDING
+----------------------------
+After collate_and_yield():
+inputs:  [[token1, token2, ..., PAD, PAD],
+          [token1, token2, token3, ..., PAD],
+          ...]
+targets: [[-1, -1, ..., target_asst1, target_asst2, ..., -1],
+          [-1, -1, -1, ..., target_asst1, target_asst2, ..., -1],
+          ...]
+
+STEP 5: MODEL FORWARD PASS
+--------------------------
+- Embedding: tokens -> (B, T, 1280) float vectors
+- 20 transformer blocks with RoPE attention
+- Final norm + logits: (B, T, 65536) probabilities
+
+STEP 6: LOSS COMPUTATION
+------------------------
+Cross-entropy loss computed only where targets != -1 (assistant tokens)
+Loss is averaged across all valid tokens in the batch.
+
+STEP 7: GRADIENT ACCUMULATION
+-----------------------------
+- 8 micro-batches (each with 8 sequences) accumulated before optimizer step
+- Effective batch = 8 sequences × 8 accumulation = 64 sequences per step
+
+================================================================================
+SECTION 8: TRAINING PROCESS AND RESULTS
+================================================================================
+
+TRAINING CONFIGURATION:
+-----------------------
+• GPU: NVIDIA A100-SXM4-40GB
+• Batch size (per device): 8 sequences
+• Gradient accumulation: 8 steps
+• Effective batch size: 64 sequences
+• Total training steps: 748
+• Epochs: 4 (12000 samples / 64 per step ≈ 187 steps per epoch × 4 epochs = 748 steps)
+• Evaluation frequency: Every 25 steps
+• Best checkpoint: Step 625
+
+TRAINING TIMELINE:
+------------------
+Start time: 2025-11-25 18:26:03
+End time: 2025-11-25 18:41:08
+Total duration: ~15 minutes
+
+LOSS PROGRESSION (Selected Steps):
+----------------------------------
+Step     | Train Loss | Val Loss  | Notes
+---------|------------|-----------|------------------
+0        | 1.868      | 1.967     | Initial baseline
+25       | 1.597      | 1.822     | New best
+50       | 1.667      | 1.676     | Steady improvement
+100      | 1.341      | 1.503     | New best
+150      | 1.388      | 1.351     | New best
+200      | 1.146      | 1.252     | New best
+250      | 1.316      | 1.142     | New best
+300      | 1.127      | 1.094     | Continued improvement
+350      | 0.804      | 0.962     | New best
+400      | 0.767      | 0.887     | New best
+450      | 0.849      | 0.840     | New best
+500      | 0.585      | 0.800     | New best
+550      | 0.912      | 0.732     | New best
+600      | 0.671      | 0.721     | New best
+625      | 0.969      | 0.669     | BEST CHECKPOINT
+650      | 0.508      | 0.695     | Slight val increase
+700      | 0.528      | 0.726     | Validation rising
+747      | 0.574      | 0.716     | Final step
+
+KEY OBSERVATIONS:
+1. Training loss decreased steadily from ~1.87 to ~0.57
+2. Validation loss decreased from 1.97 to 0.67 (66% reduction)
+3. Best validation occurred at step 625, not the final step
+4. Some overfitting visible in final steps (train loss < val loss)
+
+THROUGHPUT METRICS:
+-------------------
+• Average tokens/second: ~12,000 (steady state)
+• Time per step: ~1.0s (training) + ~4-5s (with validation)
+• Total tokens processed: ~748 steps × 64 sequences × ~150 tokens = ~7.2M tokens
+
+================================================================================
+SECTION 9: EVALUATION RESULTS AND ANALYSIS
+================================================================================
+
+EVALUATION CONFIGURATION:
+-------------------------
+• Evaluation samples: 50 (from validation set)
+• Temperature: 0.0 (deterministic/greedy decoding)
+• Top-k: 10 (limited sampling)
+• Max tokens: 128 per response
+
+ACCURACY COMPARISON:
+--------------------
+┌─────────────────┬─────────┬─────────────┬──────────┐
+│ Model           │ Correct │ Total Scored│ Accuracy │
+├─────────────────┼─────────┼─────────────┼──────────┤
+│ Base Model      │ 13      │ 34          │ 38.24%   │
+│ Fine-tuned Model│ 21      │ 50          │ 42.00%   │
+└─────────────────┴─────────┴─────────────┴──────────┘
+
+IMPROVEMENT: +3.76 percentage points (9.8% relative improvement)
+
+NOTES ON SCORING:
+- "Total Scored" differs because regex extraction failed on some responses
+- Base model: 16 responses couldn't be parsed (34/50 scored)
+- Fine-tuned model: All 50 responses were parseable
+
+QUALITATIVE EXAMPLE:
+--------------------
+QUESTION: "How long is a spider's leg?
+A. 17 meters
+B. 17 centimeters
+C. 17 millimeters"
+
+EXPECTED: "The correct answer is C. 17 millimeters
+Explanation: The best estimate for the length of a spider's leg is 17 millimeters.
+17 centimeters and 17 meters are both too long..."
+
+BASE MODEL RESPONSE: "A. 17 meters"
+(Incorrect - chose wrong answer without explanation)
+
+FINE-TUNED RESPONSE: "The correct answer is C. 17 millimeters
+Explanation: A spider's leg is about 17 centimeters long.
+A spider's leg is about 17 centimeters long..."
+(Correct answer letter, but explanation has inconsistencies)
+
+ANALYSIS OF FINE-TUNED MODEL BEHAVIOR:
+--------------------------------------
+1. FOLLOWS FORMAT: Learned to output "The correct answer is X" pattern
+2. ATTEMPTS EXPLANATIONS: Includes explanation and background sections
+3. SOME HALLUCINATION: Explanation content not always accurate
+4. IMPROVED PARSEABILITY: All responses follow expected structure
+
+ADDITIONAL EVALUATION RESULTS (From Other Training Runs):
+---------------------------------------------------------
+Kaggle run (different hyperparameters):
+• Base accuracy: 51.22% (21/41 scored)
+• Fine-tuned accuracy: 34.00% (17/50 scored)
+• Improvement: -17.22% (DEGRADATION)
+
+This suggests:
+- Hyperparameter sensitivity is significant
+- More training isn't always better (potential overfitting)
+- The v7 Colab run represents better hyperparameter choices
+
+================================================================================
+SECTION 10: CONCLUSIONS AND INSIGHTS
+================================================================================
+
+10.1 PROJECT ACHIEVEMENTS
+-------------------------
+✓ Successfully implemented SFT pipeline for science QA task
+✓ Reduced validation loss by 66% (1.97 → 0.67)
+✓ Improved answer format compliance (100% parseable responses)
+✓ Achieved 42% accuracy on science questions (vs 38.24% baseline)
+✓ Training completed efficiently in ~15 minutes on single A100
+
+10.2 KEY TECHNICAL INSIGHTS
+---------------------------
+
+a) ARCHITECTURE CHOICES THAT WORKED:
+- RoPE embeddings: Better position encoding than learned embeddings
+- Dual optimizer (AdamW + Muon): Specialized handling for different layer types
+- Pre-norm architecture: Improves training stability
+- ReLU² activation: Good trade-off between sparsity and gradient flow
+- Logit softcapping: Prevents extreme predictions
+
+b) TRAINING STRATEGIES THAT HELPED:
+- Gradient accumulation: Enables large effective batch with limited memory
+- Linear LR decay: Stable convergence without oscillation
+- Early stopping via best checkpoint: Prevents overfitting
+- Mixed precision (bfloat16): Memory efficient without accuracy loss
+
+c) DATA PROCESSING DECISIONS:
+- Masked loss: Only training on assistant tokens is crucial for SFT
+- System prompt integration: Merged with first user message for consistency
+- Truncation to 2048 tokens: Prevents OOM while handling most examples
+
+10.3 LIMITATIONS AND AREAS FOR IMPROVEMENT
+------------------------------------------
+
+a) MODEL LIMITATIONS:
+- 42% accuracy is below practical deployment threshold
+- Hallucination in explanations (factually incorrect reasoning)
+- Model size (561M) limits knowledge capacity
+- No multi-modal support (ScienceQA includes images)
+
+b) TRAINING LIMITATIONS:
+- Training on subset (12K samples vs full 21K+ dataset)
+- No hyperparameter search (fixed configuration)
+- No data augmentation or curriculum learning
+- No regularization techniques (dropout, etc.)
+
+c) EVALUATION LIMITATIONS:
+- Small evaluation set (50 samples)
+- Only multiple-choice accuracy measured
+- No assessment of explanation quality
+- No human evaluation of pedagogical value
+
+10.4 RECOMMENDATIONS FOR FUTURE WORK
+------------------------------------
+
+1. SCALE UP DATA:
+   - Use full ScienceQA dataset (21K+ examples)
+   - Add multiple epochs with varying learning rates
+   - Consider data augmentation (paraphrasing questions)
+
+2. IMPROVE ARCHITECTURE:
+   - Try larger base model if compute available
+   - Implement retrieval-augmented generation for facts
+   - Add multi-modal support for image-based questions
+
+3. ENHANCE TRAINING:
+   - Implement curriculum learning (easy → hard questions)
+   - Add regularization (dropout, label smoothing)
+   - Try RLHF for explanation quality
+
+4. BETTER EVALUATION:
+   - Use full test set (4000 samples)
+   - Implement BERTScore for explanation quality
+   - Conduct human evaluation study
+   - Test on out-of-domain science questions
+
+10.5 REPRODUCIBILITY NOTES
+--------------------------
+
+To reproduce this project:
+1. Clone nanochat repository from GitHub
+2. Download ScienceQA dataset from HuggingFace
+3. Run notebook cells 0-10 for data preparation
+4. Set SCIASSIST_TEST_MODE=0 for full training
+5. Execute sciassist_train.py via Cell 14
+6. Run sciassist_evaluate.py for analysis
+
+Required hardware: GPU with 40GB+ VRAM (A100 recommended)
+Required time: ~15 minutes for training, ~5 minutes for evaluation
+
+================================================================================
+                                 END OF REPORT
+================================================================================
+
+Report Generated: November 2025
+Project: UCMO Natural Language Processing - Science Teaching Assistant
+Author: [Student Name]
+Base Model: sdobson/nanochat (GPT-style, 561M parameters)
+Dataset: derek-thomas/ScienceQA (12K train, 4K val, 4K test)
+Training Platform: Google Colab (NVIDIA A100-SXM4-40GB)
+Framework: PyTorch 2.9+ with nanochat library
+
+================================================================================
+

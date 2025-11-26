@@ -1,0 +1,230 @@
+
+================================================================================
+SciAssist Model Evaluation
+================================================================================
+✓ Loss plot saved to finetuned_model_checkpoint/training_validation_loss.png
+Autodetected device type: cuda
+/usr/local/lib/python3.12/dist-packages/torch/__init__.py:1617: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  _C._set_float32_matmul_precision(precision)
+2025-11-25 21:10:12,483 - nanochat.common - INFO - Distributed world size: 1
+Using device: cuda
+Loaded 4000 validation samples.
+
+================================================================================
+Loading Models
+================================================================================
+2025-11-25 21:10:34,278 - nanochat.checkpoint_manager - INFO - Building model with config: {'sequence_len': 2048, 'vocab_size': 65536, 'n_layer': 20, 'n_head': 10, 'n_kv_head': 10, 'n_embd': 1280}
+✓ Base and fine-tuned models loaded.
+
+================================================================================
+Quantitative Evaluation
+================================================================================
+  Evaluated sample 50/50
+
+Base model accuracy: 13/33 (39.39%)
+Fine-tuned model accuracy: 23/50 (46.00%)
+
+================================================================================
+Qualitative Comparison
+================================================================================
+====================================================================================================
+EXAMPLE 0
+====================================================================================================
+
+📝 QUESTION:
+----------------------------------------------------------------------------------------------------
+How long is a spider's leg?
+
+A. 17 meters
+B. 17 centimeters
+C. 17 millimeters
+
+✅ EXPECTED ANSWER:
+----------------------------------------------------------------------------------------------------
+The correct answer is C. 17 millimeters
+
+Explanation: The best estimate for the length of a spider's leg is 17 millimeters.
+17 centimeters and 17 meters are both too long.
+
+Background: Measurements are written with both a number and a unit. The unit comes after the number. The unit shows what the number means.
+When you are using metric units, length can be written with units of millimeters, centimeters, meters, or kilometers. One meter contains 100 centimeters or 1,000 millimeters. So, 1 meter is larger than 1 centimeter, and 1 centimeter is larger than 1 millimeter.
+The tip of the pencil shown here is only 1 millimeter wide, but the pencil is about 16 centimeters long.
+A red fox is about 1 meter long. The Sydney Harbour Bridge in Australia is about 1,000 meters, or 1 kilometer, in length.
+
+🤖 BASE MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+A. 17 meters
+
+🎯 FINE-TUNED MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+The correct answer is C. 17 millimeters
+
+Explanation: A spider's leg is about 17 centimeters long.
+A spider's leg is about 17 centimeters long.
+
+Background: Scientists use different units to measure things. The main unit of measurement is the meter.
+A meter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A meter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A centimeter is one thousandth of a meter.
+A millimeter is one thousandth of a meter.
+A
+
+====================================================================================================
+
+====================================================================================================
+EXAMPLE 1
+====================================================================================================
+
+📝 QUESTION:
+----------------------------------------------------------------------------------------------------
+What is the volume of a bottle of cough syrup?
+
+A. 8 cups
+B. 8 fluid ounces
+C. 8 gallons
+
+✅ EXPECTED ANSWER:
+----------------------------------------------------------------------------------------------------
+The correct answer is B. 8 fluid ounces
+
+Explanation: The best estimate for the volume of a bottle of cough syrup is 8 fluid ounces.
+8 cups and 8 gallons are both too much.
+
+Background: Measurements are written with both a number and a unit. The unit comes after the number. The unit shows what the number means.
+Volume is a measurement of how much space something takes up.
+There are many different units of volume. When you are using customary units, volume may be written in units of fluid ounces, cups, or gallons.
+As the diagram shows, there are 8 fluid ounces in 1 cup and 16 cups in 1 gallon. So, 1 fluid ounce is less than 1 cup and much less than 1 gallon.
+A glass of milk has a volume of about 8 fluid ounces, or 1 cup. A jug of milk has a volume of 1 gallon.
+
+🤖 BASE MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+The volume of a bottle of cough syrup is 8 cups.
+
+🎯 FINE-TUNED MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+The correct answer is C. 8 gallons
+
+Explanation: The volume of a bottle of cough syrup is 8 cups. So, the volume of a bottle of cough syrup is 8 cups.
+
+Background: The volume of a substance is the amount of space that the substance takes up. The formula to find the volume of a substance is V = mL, where V is the volume and mL is the mass of the substance.
+Volume = mass / volume
+
+====================================================================================================
+
+====================================================================================================
+EXAMPLE 2
+====================================================================================================
+
+📝 QUESTION:
+----------------------------------------------------------------------------------------------------
+What information supports the conclusion that Will inherited this trait?
+
+A. Will's mother has blue eyes. She passed this trait down to Will.
+B. Will likes to wear a blue sweater to match his blue eyes.
+
+✅ EXPECTED ANSWER:
+----------------------------------------------------------------------------------------------------
+The correct answer is A. Will's mother has blue eyes. She passed this trait down to Will.
+
+Background: Organisms, including people, have both inherited and acquired traits. Inherited and acquired traits are gained in different ways.
+Inherited traits are passed down through families. Children gain these traits from their parents. Inherited traits do not need to be learned.
+Acquired traits are gained during a person's life. Some acquired traits, such as riding a bicycle, are gained by learning. Other acquired traits, such as scars, are caused by the environment.
+
+🤖 BASE MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+The information supporting the conclusion that Will inherited this trait is:
+
+1. The fact that Will's mother has blue eyes.
+2. The fact that Will has blue eyes.
+3. The fact that Will likes to wear a blue sweater to match his blue eyes.
+
+These three pieces of information collectively support the conclusion that Will inherited the trait of blue eyes from his mother.
+
+🎯 FINE-TUNED MODEL RESPONSE:
+----------------------------------------------------------------------------------------------------
+The correct answer is B. Will likes to wear a blue sweater to match his blue eyes.
+
+Background: Scientists use evidence from observations and experiments to make conclusions about a topic. The evidence supports the conclusion that Will inherited his blue eyes trait.
+Background: Inherited is a word that means something is in your family. It is also a word that means something happens to someone because of something else.
+Background: Inherited is a word that means something happens to someone because of something else.
+Background: The trait that scientists are studying is called inherited. Inherited is a word that means something happens to someone because of something else.
+Background: Inherited is a word that means something happens to someone because of something else.
+Background: The trait that scientists are studying is called inherited. Inherited is a word that means something happens to someone because of something else.
+Background: Inherited is a word that means something happens to someone because of something else.
+Background: The trait that scientists are studying is called inherited. Inherited is a word that means something happens to someone because of something else.
+Background: Inherited is a word that means something happens to someone because of something else.
+Background: The trait that scientists are studying is called inherited. Inherited is a word that means something
+
+====================================================================================================
+
+
+================================================================================
+Interactive Testing
+================================================================================
+
+================================================================================
+Testing Question: What is photosynthesis?
+A. The process plants use ...
+================================================================================
+
+🤖 BASE MODEL RESPONSE:
+--------------------------------------------------
+B. The process of cell division
+
+Photosynthesis is the process by which plants, algae, and some bacteria convert sunlight, water, and carbon dioxide into glucose and oxygen. This process is essential for life on Earth as it provides the energy and organic compounds needed for plants to grow and thrive.
+
+🎯 FINE-TUNED MODEL RESPONSE:
+--------------------------------------------------
+The correct answer is A. The process plants use to make food from sunlight
+
+Explanation: Photosynthesis is the process plants use to make food from sunlight. Plants use sunlight, water, and carbon dioxide to make food. The food produced by photosynthesis is used by the plant to grow and survive.
+
+================================================================================
+Testing Question: What is the main cause of ocean tides?
+A. Wind blo...
+================================================================================
+
+🤖 BASE MODEL RESPONSE:
+--------------------------------------------------
+The main cause of ocean tides is the gravitational pull of the Moon. The Moon's gravity causes the water in the ocean to bulge outward, creating a force that pulls the water towards the center of the Earth. This force is what causes the tides to rise and fall.
+
+🎯 FINE-TUNED MODEL RESPONSE:
+--------------------------------------------------
+The correct answer is A. Wind blowing across the ocean surface
+
+Explanation: The main cause of ocean tides is the gravitational pull of the Moon. The Moon pulls on the Earth's oceans, causing the water to rise and fall. This pull is caused by the Moon's gravity, which is about one-sixth of Earth's gravity.
+
+================================================================================
+Testing Question: Which state of matter has a definite volume but no...
+================================================================================
+
+🤖 BASE MODEL RESPONSE:
+--------------------------------------------------
+A. Solid
+
+🎯 FINE-TUNED MODEL RESPONSE:
+--------------------------------------------------
+The correct answer is A. Solid
+
+Explanation: A solid is a type of matter that has a definite volume but no definite shape. Solid objects have a definite volume, but they do not have a definite shape.
+
+================================================================================
+Evaluation Complete
+================================================================================
+
