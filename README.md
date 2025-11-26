@@ -87,7 +87,7 @@ The fine-tuned model was evaluated against the base model on both quantitative a
 
 The plot below shows the training and validation loss over the course of the fine-tuning process. The best validation loss was achieved at step 625.
 
-! [Training and Validation Loss Curve] (./training_validation_loss_sample_v2.png)
+![Training and Validation Loss Curve](https://github.com/nidhinninan/nanochat-QA_finetune_NLP-Proj/blob/main/training_validation_loss_sample_v2.png)
 
 ### Qualitative Analysis
 
