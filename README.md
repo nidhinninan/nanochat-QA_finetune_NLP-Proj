@@ -114,6 +114,14 @@ The plot below shows the training and validation loss over the course of the fin
     - Open and run the `sciassist-fine-tune-model-NEW_v7_single_colab.ipynb` notebook in a GPU-enabled environment (like Google Colab or Kaggle).
     - The notebook will handle data downloading, preprocessing, training, and evaluation.
 
+3.  **Set environment variables for a full run**:
+      ```bash
+      import os
+      os.environ["SCIASSIST_TEST_MODE"] = "0"     # enables full training loop
+      os.environ["SCIASSIST_SKIP_TRAINING"] = "0" # make sure training runs
+      ```
+      You can leave SCIASSIST_FORCE_DEVICE unset so the script auto-detects the GPU.
+
 3.  **Run Scripts Directly**:
     - First, run the data preparation cells in the notebook to create the formatted datasets.
     - Then, execute the training script:
